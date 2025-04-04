@@ -5,14 +5,14 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 
 	// Import your models package (adjust path 'myapp' if needed)
 	"myapp/models"
 
-	_ "github.com/mattn/go-sqlite3" // Still needed for UNIQUE constraint check
+	// Usar modernc.org/sqlite en lugar de github.com/mattn/go-sqlite3
+	_ "modernc.org/sqlite"
 	
-	"github.com/mattn/go-sqlite3" // Still needed for UNIQUE constraint check
-
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -63,8 +63,9 @@ func PostRegisterHandler(db *sql.DB) http.HandlerFunc {
 			response := models.NewErrorResponse("Failed to register user")
 			statusCode := http.StatusInternalServerError
 
-			// Check for specific SQLite UNIQUE constraint error
-			if sqliteErr, ok := err.(sqlite3.Error); ok && sqliteErr.ExtendedCode == sqlite3.ErrConstraintUnique {
+			// Check for UNIQUE constraint error by inspecting the error message
+			// modernc.org/sqlite returns error messages that we need to parse
+			if isUniqueConstraintError(err) {
 				response = models.NewErrorResponse("Username already in use")
 				statusCode = http.StatusConflict // 409 Conflict is appropriate
 			} else {
@@ -108,4 +109,57 @@ func PostRegisterHandler(db *sql.DB) http.HandlerFunc {
 		w.WriteHeader(http.StatusCreated) // 201 Created is the correct status code
 		json.NewEncoder(w).Encode(response)
 	}
+}
+
+// isUniqueConstraintError checks if the error is a UNIQUE constraint violation
+// by examining the error message since modernc.org/sqlite doesn't expose error types like mattn/go-sqlite3 does
+func isUniqueConstraintError(err error) bool {
+	if err == nil {
+		return false
+	}
+	
+	errMsg := strings.ToLower(err.Error())
+	return strings.Contains(errMsg, "unique constraint") ||
+		strings.Contains(errMsg, "constraint failed") ||
+		strings.Contains(errMsg, "constraint violation") ||
+		strings.Contains(errMsg, "duplicate") ||
+		strings.Contains(errMsg, "unique") && strings.Contains(errMsg, "fail")
+}
+
+// Para la inicialización de la base de datos, puedes usar algo como esto:
+// Note: This part might be in a different file, like main.go or db.go
+
+// InitDB initializes the SQLite database connection
+func InitDB(dbPath string) (*sql.DB, error) {
+	// El DSN para modernc.org/sqlite requiere el prefijo "file:"
+	db, err := sql.Open("sqlite", "file:"+dbPath+"?_foreign_keys=on")
+	if err != nil {
+		return nil, err
+	}
+	
+	// Test the connection
+	if err := db.Ping(); err != nil {
+		return nil, err
+	}
+	
+	// Initialize schema if needed
+	if err := initSchema(db); err != nil {
+		return nil, err
+	}
+	
+	return db, nil
+}
+
+// initSchema creates the necessary tables if they don't exist
+func initSchema(db *sql.DB) error {
+	// Create users table
+	_, err := db.Exec(`
+	CREATE TABLE IF NOT EXISTS users (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		username TEXT NOT NULL UNIQUE,
+		password_hash TEXT NOT NULL,
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+	)`)
+	
+	return err
 }

@@ -4,7 +4,7 @@ import (
     "database/sql"
     "log"
     //"os" // Para trabajar con el sistema de archivos
-    _ "github.com/mattn/go-sqlite3" // Driver SQLite
+    _ "modernc.org/sqlite" // Driver SQLite puro Go
 )
 
 
@@ -18,7 +18,8 @@ type UserModel struct {
 // setupDatabase inicializa la conexión a la BD
 func setupDatabase(dbPath string) (*sql.DB, error) {
     log.Printf("Conectando a la base de datos en: %s", dbPath)
-    db, err := sql.Open("sqlite3", dbPath)
+    // Nota: Con modernc.org/sqlite necesitamos el prefijo "file:" y el nombre del driver es "sqlite"
+    db, err := sql.Open("sqlite", "file:"+dbPath+"?_foreign_keys=on")
     if err != nil {
         return nil, err
     }
@@ -28,7 +29,7 @@ func setupDatabase(dbPath string) (*sql.DB, error) {
         db.Close() // Cerrar si el ping falla
         return nil, err
     }
-	log.Println("Base de datos conectada exitosamente.")
+    log.Println("Base de datos conectada exitosamente.")
     // Podríamos añadir aquí la creación de tablas si no existen
     // _, err = db.Exec(`CREATE TABLE IF NOT EXISTS users (...)`)
 
