@@ -37,7 +37,7 @@ func GenerateJWT(userID int) (string, time.Time, error) {
 }
 
 // hashToken crea un hash SHA256 del token para almacenamiento seguro
-func hashToken(token string) string {
+func HashToken(token string) string {
     hasher := sha256.New()
     hasher.Write([]byte(token))
     return hex.EncodeToString(hasher.Sum(nil))
@@ -45,7 +45,7 @@ func hashToken(token string) string {
 
 // storeToken guarda el hash del token en la base de datos
 func StoreToken(db *sql.DB, userID int, token string, expiresAt time.Time) error {
-    tokenHash := hashToken(token)
+    tokenHash := HashToken(token)
     stmt, err := db.Prepare("INSERT INTO tokens(user_id, token_hash, expires_at) VALUES(?, ?, ?)")
     if err != nil {
         return fmt.Errorf("error preparando statement para guardar token: %w", err)
@@ -60,7 +60,7 @@ func StoreToken(db *sql.DB, userID int, token string, expiresAt time.Time) error
 
 // invalidateToken marca un token como inactivo (elimina de la tabla)
 func InvalidateToken(db *sql.DB, token string) error {
-    tokenHash := hashToken(token)
+    tokenHash := HashToken(token)
     stmt, err := db.Prepare("DELETE FROM tokens WHERE token_hash = ?")
      if err != nil {
         return fmt.Errorf("error preparando statement para invalidar token: %w", err)
@@ -81,7 +81,7 @@ func InvalidateToken(db *sql.DB, token string) error {
 }
 
 // validateTokenAndGetUserID verifica el token, su validez en DB y devuelve el UserID
-func validateTokenAndGetUserID(db *sql.DB, tokenString string) (int, error) {
+func ValidateTokenAndGetUserID(db *sql.DB, tokenString string) (int, error) {
     claims := &jwt.RegisteredClaims{}
     token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
         // Verificar método de firma
@@ -96,7 +96,7 @@ func validateTokenAndGetUserID(db *sql.DB, tokenString string) (int, error) {
             log.Println("Token expirado detectado:", err)
             // Limpiar token expirado de la DB (opcional, pero buena práctica)
             go func() { // Ejecutar en goroutine para no bloquear
-                errClean := cleanupExpiredToken(db, tokenString)
+                errClean := CleanupExpiredToken(db, tokenString)
                 if errClean != nil {
                     log.Printf("Error limpiando token expirado de DB: %v", errClean)
                 }
@@ -110,7 +110,7 @@ func validateTokenAndGetUserID(db *sql.DB, tokenString string) (int, error) {
     }
 
     // Verificar si el token (su hash) está activo en la base de datos
-    tokenHash := hashToken(tokenString)
+    tokenHash := HashToken(tokenString)
     var dbUserID int
     var expiresAt time.Time
     err = db.QueryRow("SELECT user_id, expires_at FROM tokens WHERE token_hash = ?", tokenHash).Scan(&dbUserID, &expiresAt)
@@ -124,7 +124,7 @@ func validateTokenAndGetUserID(db *sql.DB, tokenString string) (int, error) {
     // Doble check de expiración (aunque ParseWithClaims ya lo hace)
     if time.Now().After(expiresAt) {
          go func() { // Limpiar si está expirado pero aún en DB
-            errClean := cleanupExpiredToken(db, tokenString)
+            errClean := CleanupExpiredToken(db, tokenString)
             if errClean != nil {
                 log.Printf("Error limpiando token expirado de DB (check secundario): %v", errClean)
             }
@@ -144,7 +144,7 @@ func validateTokenAndGetUserID(db *sql.DB, tokenString string) (int, error) {
 
 
 // Middleware de autenticación JWT
-func jwtAuthMiddleware(db *sql.DB) func(http.Handler) http.Handler {
+func JwtAuthMiddleware(db *sql.DB) func(http.Handler) http.Handler {
     return func(next http.Handler) http.Handler {
         return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
             authHeader := r.Header.Get("Authorization")
@@ -160,7 +160,7 @@ func jwtAuthMiddleware(db *sql.DB) func(http.Handler) http.Handler {
             }
 
             tokenString := parts[1]
-            userID, err := validateTokenAndGetUserID(db, tokenString)
+            userID, err := ValidateTokenAndGetUserID(db, tokenString)
             if err != nil {
                 log.Printf("Error validando token: %v", err)
                 http.Error(w, "Token inválido o expirado", http.StatusUnauthorized)
@@ -175,8 +175,8 @@ func jwtAuthMiddleware(db *sql.DB) func(http.Handler) http.Handler {
 }
 
 // cleanupExpiredToken (helper para limpiar tokens expirados)
-func cleanupExpiredToken(db *sql.DB, tokenString string) error {
-    tokenHash := hashToken(tokenString)
+func CleanupExpiredToken(db *sql.DB, tokenString string) error {
+    tokenHash := HashToken(tokenString)
     _, err := db.Exec("DELETE FROM tokens WHERE token_hash = ?", tokenHash)
     if err != nil && err != sql.ErrNoRows {
          return fmt.Errorf("error eliminando token expirado hash %s: %w", tokenHash[:10], err)

@@ -29,6 +29,8 @@ type RegisterSuccessData struct {
 	Username string `json:"username"`
 }
 
+
+
 // --- Generic API Response Structures ---
 
 // ErrorDetail provides a structured way to return error information.
